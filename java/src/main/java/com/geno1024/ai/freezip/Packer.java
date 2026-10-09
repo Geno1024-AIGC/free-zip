@@ -59,7 +59,7 @@ public final class Packer {
                 MsDosDateTime.of(modified),
                 hostSystem,
                 externalAttributes,
-                options.comment());
+                "");
 
         Files.write(StoredEntryFiles.localHeader(outputPrefix), LocalFileHeader.of(entry).serialize());
         Files.write(StoredEntryFiles.centralHeader(outputPrefix),

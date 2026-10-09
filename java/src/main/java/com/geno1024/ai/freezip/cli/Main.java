@@ -25,7 +25,7 @@ import java.util.zip.Deflater;
  * Command line front end.
  *
  * <pre>
- * free-zip pack     &lt;input-file&gt; &lt;output-prefix&gt; [--name N] [--method store|deflate] [--level L] [--comment C]
+ * free-zip pack     &lt;input-file&gt; &lt;output-prefix&gt; [--name N] [--method store|deflate] [--level L]
  * free-zip edit     &lt;entry&gt;    [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]
  * free-zip assemble &lt;output.zip&gt; &lt;entry|dir&gt;...    [--zip64 auto|always|never] [--comment C]
  * free-zip size     &lt;entry|dir&gt;...                 [--zip64 auto|always|never] [--comment C]
@@ -66,8 +66,7 @@ public final class Main {
         int level = parsed.has("level")
                 ? Integer.parseInt(parsed.option("level", ""))
                 : Deflater.DEFAULT_COMPRESSION;
-        PackOptions options = new PackOptions(
-                parsed.option("name", null), method, level, parsed.option("comment", ""));
+        PackOptions options = new PackOptions(parsed.option("name", null), method, level);
 
         StoredEntry entry = Packer.pack(input, prefix, options);
         System.out.printf("packed %s -> %s%n", input, StoredEntryFiles.key(prefix));
@@ -178,7 +177,7 @@ public final class Main {
     private static void usage(java.io.PrintStream out) {
         out.println("free-zip — pre-compressed ZIP assembly");
         out.println();
-        out.println("  pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L] [--comment C]");
+        out.println("  pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]");
         out.println("  edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]");
         out.println("  assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]");
         out.println("  size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]");

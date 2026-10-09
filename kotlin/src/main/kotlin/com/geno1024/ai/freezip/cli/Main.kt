@@ -19,7 +19,8 @@ import kotlin.system.exitProcess
  * Command line front end.
  *
  * ```
- * free-zip pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L] [--comment C]
+ * free-zip pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]
+ * free-zip edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]
  * free-zip assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]
  * free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]
  * ```
@@ -54,7 +55,7 @@ private fun pack(args: Array<String>) {
     } else {
         Deflater.DEFAULT_COMPRESSION
     }
-    val options = PackOptions(parsed.optionOrNull("name"), method, level, parsed.option("comment", ""))
+    val options = PackOptions(parsed.optionOrNull("name"), method, level)
 
     val entry = Packer.pack(input, prefix, options)
     println("packed $input -> ${StoredEntryFiles.key(prefix)}")
@@ -154,7 +155,7 @@ private fun parseMethod(value: String): CompressionMethod = when (value.lowercas
 private fun usage(out: PrintStream) {
     out.println("free-zip — pre-compressed ZIP assembly")
     out.println()
-    out.println("  pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L] [--comment C]")
+    out.println("  pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]")
     out.println("  edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]")
     out.println("  assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]")
     out.println("  size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]")

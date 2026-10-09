@@ -53,7 +53,7 @@ object Packer {
             dosTime = MsDosDateTime.of(modified),
             hostSystem = hostSystem,
             externalAttributes = externalAttributes,
-            comment = options.comment,
+            comment = "",
         )
 
         Files.write(StoredEntryFiles.localHeader(outputPrefix), LocalFileHeader.of(entry).serialize())

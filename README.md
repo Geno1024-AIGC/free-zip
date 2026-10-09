@@ -48,7 +48,9 @@ flowchart LR
 
 ```bash
 java -jar java/build/libs/free-zip-java-all.jar \
-  pack hello.txt store/hello.txt --method deflate --comment "greeting"
+  pack hello.txt store/hello.txt --method deflate
+java -jar java/build/libs/free-zip-java-all.jar \
+  edit store/hello.txt --comment "greeting"
 java -jar java/build/libs/free-zip-java-all.jar \
   assemble out.zip store --zip64 auto
 java -jar java/build/libs/free-zip-java-all.jar size store
@@ -57,7 +59,7 @@ java -jar java/build/libs/free-zip-java-all.jar size store
 ### CLI
 
 ```
-free-zip pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L] [--comment C]
+free-zip pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]
 free-zip edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]
 free-zip assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]
 free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]
@@ -66,7 +68,7 @@ free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--co
 - `assemble` / `size` 接受条目 key，或包含 `*.lfh` 的目录（目录内按文件名排序）。
 - `size` 精确计算 `assemble` 将产生的字节数，可用于 HTTP `Content-Length`，且不读取任何载荷。
 - `--zip64`：`auto`（仅在字段溢出时写 Zip64 记录）、`always`（总是写，并使经典 EOCD 字段饱和）、`never`。
-- `--comment`：`pack` 写入**条目注释**（Central Directory File Header，§4.3.12）；`assemble` / `size` 写入**归档注释**（End of Central Directory record，§4.3.16）。均以 UTF-8 编码，规范上限 65535 字节。注意 Local File Header（§4.3.7）没有注释字段，条目注释只存在于中央目录中。
+- `--comment`（`assemble` / `size`）：写入**归档注释**（End of Central Directory record，§4.3.16），以 UTF-8 编码，规范上限 65535 字节。**条目注释**另走 `edit --comment`（见下），不放在 `pack` 里，因为注释与压缩无关、属于纯元数据改动。
 
 ### 编辑条目（`edit`）
 
