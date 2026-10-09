@@ -64,6 +64,7 @@ free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--co
 - `assemble` / `size` 接受条目 key，或包含 `*.lfh` 的目录（目录内按文件名排序）。
 - `size` 精确计算 `assemble` 将产生的字节数，可用于 HTTP `Content-Length`，且不读取任何载荷。
 - `--zip64`：`auto`（仅在字段溢出时写 Zip64 记录）、`always`（总是写，并使经典 EOCD 字段饱和）、`never`。
+- `--comment`：`pack` 写入**条目注释**（Central Directory File Header，§4.3.12）；`assemble` / `size` 写入**归档注释**（End of Central Directory record，§4.3.16）。均以 UTF-8 编码，规范上限 65535 字节。注意 Local File Header（§4.3.7）没有注释字段，条目注释只存在于中央目录中。
 
 ## Zip64 说明
 
