@@ -35,12 +35,4 @@ object ZipFormat {
     // Overflow sentinels for 16- and 32-bit fields. APPNOTE.TXT §4.4.1.4.
     const val UINT16_MAX = 0xFFFF
     const val UINT32_MAX = 0xFFFFFFFFL
-
-    // General purpose bit flags. APPNOTE.TXT §4.4.4.
-    const val FLAG_DATA_DESCRIPTOR = 1 shl 3
-    const val FLAG_UTF8 = 1 shl 11
-
-    // Extra field header ids. APPNOTE.TXT §4.5.3 (Zip64), §4.5.2 (Info-ZIP Unix).
-    const val EXTRA_FIELD_ZIP64 = 0x0001
-    const val EXTRA_FIELD_UNIX = 0x5855
 }

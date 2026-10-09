@@ -50,16 +50,16 @@ object Packer {
             crc32 = crc.value,
             compressedSize = sizes.compressed,
             uncompressedSize = sizes.uncompressed,
-            dosTime = DosTime.of(modified),
+            dosTime = MsDosDateTime.of(modified),
             hostSystem = hostSystem,
             externalAttributes = externalAttributes,
             comment = options.comment,
         )
 
-        Files.write(StoredEntryFiles.localHeader(outputPrefix), HeaderCodec.localFileHeader(entry))
+        Files.write(StoredEntryFiles.localHeader(outputPrefix), LocalFileHeader.of(entry).serialize())
         Files.write(
             StoredEntryFiles.centralHeader(outputPrefix),
-            HeaderCodec.centralDirectoryFileHeader(entry, 0),
+            CentralDirectoryFileHeader.of(entry, 0).serialize(),
         )
         return entry
     }

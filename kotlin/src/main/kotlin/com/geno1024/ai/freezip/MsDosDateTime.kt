@@ -13,7 +13,7 @@ import java.time.LocalDateTime
  * time: bits 0..4 second / 2, 5..10 minute, 11..15 hour
  * ```
  */
-data class DosTime(val time: Int, val date: Int) {
+data class MsDosDateTime(val time: Int, val date: Int) {
 
     fun toLocalDateTime(): LocalDateTime {
         val year = ((date ushr 9) and 0x7F) + 1980
@@ -27,7 +27,7 @@ data class DosTime(val time: Int, val date: Int) {
 
     companion object {
         /** Encodes a date/time, clamping years to 1980 and later. */
-        fun of(value: LocalDateTime): DosTime {
+        fun of(value: LocalDateTime): MsDosDateTime {
             val year = maxOf(value.year - 1980, 0)
             val dosDate = ((year and 0x7F) shl 9) or
                 ((value.monthValue and 0x0F) shl 5) or
@@ -35,7 +35,7 @@ data class DosTime(val time: Int, val date: Int) {
             val dosTime = ((value.hour and 0x1F) shl 11) or
                 ((value.minute and 0x3F) shl 5) or
                 ((value.second / 2) and 0x1F)
-            return DosTime(dosTime, dosDate)
+            return MsDosDateTime(dosTime, dosDate)
         }
     }
 }

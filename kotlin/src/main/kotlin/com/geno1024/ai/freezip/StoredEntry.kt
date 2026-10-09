@@ -20,7 +20,7 @@ data class StoredEntry(
     val crc32: Long,
     val compressedSize: Long,
     val uncompressedSize: Long,
-    val dosTime: DosTime,
+    val dosTime: MsDosDateTime,
     val hostSystem: Int,
     val externalAttributes: Int,
     val comment: String?,
@@ -33,7 +33,7 @@ data class StoredEntry(
 
     /** General purpose bit flag. APPNOTE.TXT §4.4.4 (bit 11 = UTF-8 name). */
     val flags: Int
-        get() = if (isAscii(name) && isAscii(comment)) 0 else ZipFormat.FLAG_UTF8
+        get() = if (isAscii(name) && isAscii(comment)) 0 else GeneralPurposeBitFlag.UTF8
 
     /** True when either 32-bit size field would overflow and Zip64 is required. */
     val needsZip64Sizes: Boolean
@@ -59,7 +59,35 @@ data class StoredEntry(
     val commentBytes: ByteArray
         get() = comment?.toByteArray(StandardCharsets.UTF_8) ?: ByteArray(0)
 
-    private companion object {
-        fun isAscii(value: String?): Boolean = value == null || value.all { it.code <= 0x7F }
+    companion object {
+        /**
+         * Combines the two parsed headers, validating that the duplicated fields
+         * agree. Inverse of [LocalFileHeader.of] / [CentralDirectoryFileHeader.of].
+         */
+        fun of(local: LocalFileHeader, central: CentralDirectoryFileHeader): StoredEntry {
+            require(local.name == central.name) {
+                "name mismatch between local and central header: ${local.name} vs ${central.name}"
+            }
+            require(
+                local.crc32 == central.crc32 &&
+                    local.compressedSize == central.compressedSize &&
+                    local.uncompressedSize == central.uncompressedSize &&
+                    local.method == central.method,
+            ) { "inconsistent size/crc/method for entry: ${local.name}" }
+
+            return StoredEntry(
+                name = local.name,
+                method = local.method,
+                crc32 = local.crc32,
+                compressedSize = local.compressedSize,
+                uncompressedSize = local.uncompressedSize,
+                dosTime = local.dosTime,
+                hostSystem = (central.versionMadeBy ushr 8) and 0xFF,
+                externalAttributes = central.externalAttributes,
+                comment = central.comment,
+            )
+        }
+
+        private fun isAscii(value: String?): Boolean = value == null || value.all { it.code <= 0x7F }
     }
 }
