@@ -22,4 +22,12 @@ data class PackOptions(
         fun defaults(entryName: String?): PackOptions =
             PackOptions(entryName, CompressionMethod.DEFLATED, Deflater.DEFAULT_COMPRESSION, "")
     }
+
+    fun withEntryName(value: String?): PackOptions = copy(entryName = value)
+
+    fun withMethod(value: CompressionMethod): PackOptions = copy(method = value)
+
+    fun withCompressionLevel(value: Int): PackOptions = copy(compressionLevel = value)
+
+    fun withComment(value: String): PackOptions = copy(comment = value)
 }
