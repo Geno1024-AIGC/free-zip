@@ -3,12 +3,15 @@ package com.geno1024.ai.freezip.cli
 import com.geno1024.ai.freezip.AssembleOptions
 import com.geno1024.ai.freezip.Assembler
 import com.geno1024.ai.freezip.CompressionMethod
+import com.geno1024.ai.freezip.EntryEditor
+import com.geno1024.ai.freezip.EntryOperation
 import com.geno1024.ai.freezip.PackOptions
 import com.geno1024.ai.freezip.Packer
 import com.geno1024.ai.freezip.StoredEntryFiles
 import java.io.PrintStream
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.LocalDateTime
 import java.util.zip.Deflater
 import kotlin.system.exitProcess
 
@@ -28,6 +31,7 @@ fun main(args: Array<String>) {
     }
     when (args[0]) {
         "pack" -> pack(args)
+        "edit" -> edit(args)
         "assemble" -> assemble(args)
         "size" -> size(args)
         "help", "-h", "--help" -> usage(System.out)
@@ -59,6 +63,34 @@ private fun pack(args: Array<String>) {
             "compressed=${entry.compressedSize} uncompressed=${entry.uncompressedSize} " +
             "crc=${entry.crc32.toString(16).padStart(8, '0')}",
     )
+}
+
+private fun edit(args: Array<String>) {
+    val parsed = Parsed.from(args)
+    require(parsed.positional.size == 1) { "edit expects <entry>" }
+    val key = StoredEntryFiles.key(Path.of(parsed.positional[0]))
+    require(StoredEntryFiles.exists(key)) { "incomplete stored entry: $key" }
+
+    val operations = ArrayList<EntryOperation>()
+    if (parsed.has("comment")) {
+        operations.add(EntryOperation.SetComment(parsed.option("comment", "")))
+    }
+    if (parsed.has("name")) {
+        operations.add(EntryOperation.Rename(parsed.option("name", "")))
+    }
+    if (parsed.has("time")) {
+        operations.add(EntryOperation.SetModificationTime(LocalDateTime.parse(parsed.option("time", ""))))
+    }
+    if (parsed.has("mode")) {
+        operations.add(EntryOperation.SetUnixMode(parsed.option("mode", "").toInt(8)))
+    }
+    require(operations.isNotEmpty()) {
+        "edit needs at least one of --comment/--name/--time/--mode"
+    }
+
+    val entry = EntryEditor.edit(key, operations)
+    println("edited $key")
+    println("  name=${entry.name} time=${entry.dosTime} comment=${entry.comment}")
 }
 
 private fun assemble(args: Array<String>) {
@@ -123,6 +155,7 @@ private fun usage(out: PrintStream) {
     out.println("free-zip — pre-compressed ZIP assembly")
     out.println()
     out.println("  pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L] [--comment C]")
+    out.println("  edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]")
     out.println("  assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]")
     out.println("  size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]")
     out.println()
