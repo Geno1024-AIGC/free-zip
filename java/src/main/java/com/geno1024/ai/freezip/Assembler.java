@@ -106,10 +106,22 @@ public final class Assembler {
             throws IOException {
         if (zip64Required(count, centralDirectorySize, centralDirectoryOffset, options)) {
             long zip64EndOffset = centralDirectoryOffset + centralDirectorySize;
-            writeZip64EndOfCentralDirectoryRecord(out, count, centralDirectorySize, centralDirectoryOffset);
-            writeZip64EndOfCentralDirectoryLocator(out, zip64EndOffset);
+            out.write(new Zip64EndOfCentralDirectoryRecord(               // §4.3.14
+                    (ZipFormat.HOST_UNIX << 8) | ZipFormat.VERSION_NEEDED_ZIP64,
+                    ZipFormat.VERSION_NEEDED_ZIP64,
+                    0, 0, count, count,
+                    centralDirectorySize, centralDirectoryOffset).serialize());
+            out.write(new Zip64EndOfCentralDirectoryLocator(0, zip64EndOffset, 1).serialize()); // §4.3.15
         }
-        writeEndOfCentralDirectoryRecord(out, count, centralDirectorySize, centralDirectoryOffset, options);
+
+        boolean saturate = options.zip64() == AssembleOptions.Zip64Mode.ALWAYS;
+        int entries = saturate || count >= ZipFormat.UINT16_MAX ? ZipFormat.UINT16_MAX : (int) count;
+        long size = saturate || centralDirectorySize >= ZipFormat.UINT32_MAX
+                ? ZipFormat.UINT32_MAX : centralDirectorySize;
+        long offset = saturate || centralDirectoryOffset >= ZipFormat.UINT32_MAX
+                ? ZipFormat.UINT32_MAX : centralDirectoryOffset;
+        out.write(new EndOfCentralDirectoryRecord(0, 0, entries, entries, size, offset,
+                options.comment()).serialize());                          // §4.3.16
     }
 
     private static boolean zip64Required(long count, long centralDirectorySize, long centralDirectoryOffset,
@@ -121,57 +133,6 @@ public final class Assembler {
                     || centralDirectorySize >= ZipFormat.UINT32_MAX
                     || centralDirectoryOffset >= ZipFormat.UINT32_MAX;
         };
-    }
-
-    /** Zip64 end of central directory record. APPNOTE.TXT §4.3.14. */
-    private static void writeZip64EndOfCentralDirectoryRecord(OutputStream out, long count,
-                                                              long centralDirectorySize,
-                                                              long centralDirectoryOffset) throws IOException {
-        LittleEndian.writeUInt32(out, ZipFormat.ZIP64_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
-        // §4.3.14.1: size excludes the leading 12 bytes.
-        LittleEndian.writeUInt64(out,
-                ZipFormat.ZIP64_END_OF_CENTRAL_DIRECTORY_RECORD_FIXED_SIZE - 12);
-        LittleEndian.writeUInt16(out, (ZipFormat.HOST_UNIX << 8) | ZipFormat.VERSION_NEEDED_ZIP64);
-        LittleEndian.writeUInt16(out, ZipFormat.VERSION_NEEDED_ZIP64);
-        LittleEndian.writeUInt32(out, 0);                 // number of this disk
-        LittleEndian.writeUInt32(out, 0);                 // disk with start of central directory
-        LittleEndian.writeUInt64(out, count);             // entries on this disk
-        LittleEndian.writeUInt64(out, count);             // total entries
-        LittleEndian.writeUInt64(out, centralDirectorySize);
-        LittleEndian.writeUInt64(out, centralDirectoryOffset);
-    }
-
-    /** Zip64 end of central directory locator. APPNOTE.TXT §4.3.15. */
-    private static void writeZip64EndOfCentralDirectoryLocator(OutputStream out, long zip64EndOffset)
-            throws IOException {
-        LittleEndian.writeUInt32(out, ZipFormat.ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR_SIGNATURE);
-        LittleEndian.writeUInt32(out, 0);                 // disk with the Zip64 EOCD record
-        LittleEndian.writeUInt64(out, zip64EndOffset);
-        LittleEndian.writeUInt32(out, 1);                 // total number of disks
-    }
-
-    /** End of central directory record. APPNOTE.TXT §4.3.16. */
-    private static void writeEndOfCentralDirectoryRecord(OutputStream out, long count,
-                                                         long centralDirectorySize,
-                                                         long centralDirectoryOffset,
-                                                         AssembleOptions options) throws IOException {
-        boolean saturate = options.zip64() == AssembleOptions.Zip64Mode.ALWAYS;
-        int entries = saturate || count >= ZipFormat.UINT16_MAX ? ZipFormat.UINT16_MAX : (int) count;
-        long size = saturate || centralDirectorySize >= ZipFormat.UINT32_MAX
-                ? ZipFormat.UINT32_MAX : centralDirectorySize;
-        long offset = saturate || centralDirectoryOffset >= ZipFormat.UINT32_MAX
-                ? ZipFormat.UINT32_MAX : centralDirectoryOffset;
-        byte[] comment = commentBytes(options);
-
-        LittleEndian.writeUInt32(out, ZipFormat.END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
-        LittleEndian.writeUInt16(out, 0);                 // number of this disk
-        LittleEndian.writeUInt16(out, 0);                 // disk with start of central directory
-        LittleEndian.writeUInt16(out, entries);           // entries on this disk
-        LittleEndian.writeUInt16(out, entries);           // total entries
-        LittleEndian.writeUInt32(out, size);
-        LittleEndian.writeUInt32(out, offset);
-        LittleEndian.writeUInt16(out, comment.length);
-        out.write(comment);
     }
 
     private static byte[] commentBytes(AssembleOptions options) {
