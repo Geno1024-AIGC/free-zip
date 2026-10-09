@@ -14,6 +14,7 @@ flowchart LR
 ```
 
 - `pack`：压缩单个文件一次，落盘为三件套。
+- `edit`：原地修改已打包条目的元数据（注释、名字、时间、Unix 模式），不重新压缩、不动 `.data`。
 - `assemble`：按顺序逐字节复制每个条目的本地头与数据，最后重建中央目录，追加结尾记录。整个过程顺序写出，条目本地头偏移在写中央目录时才知道——这正是“预存头部”方案成立的关键。
 
 ### 三件套命名
@@ -57,6 +58,7 @@ java -jar java/build/libs/free-zip-java-all.jar size store
 
 ```
 free-zip pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L] [--comment C]
+free-zip edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]
 free-zip assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]
 free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]
 ```
@@ -65,6 +67,24 @@ free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--co
 - `size` 精确计算 `assemble` 将产生的字节数，可用于 HTTP `Content-Length`，且不读取任何载荷。
 - `--zip64`：`auto`（仅在字段溢出时写 Zip64 记录）、`always`（总是写，并使经典 EOCD 字段饱和）、`never`。
 - `--comment`：`pack` 写入**条目注释**（Central Directory File Header，§4.3.12）；`assemble` / `size` 写入**归档注释**（End of Central Directory record，§4.3.16）。均以 UTF-8 编码，规范上限 65535 字节。注意 Local File Header（§4.3.7）没有注释字段，条目注释只存在于中央目录中。
+
+### 编辑条目（`edit`）
+
+`edit` 原地修改一个已打包条目的元数据：读取 `<key>.lfh` 与 `<key>.cdfh`，套用若干**操作**，再把两个头写回。它**从不触碰 `<key>.data`**，因此不需要重新压缩，sizes 与 CRC 保持不变。
+
+| 操作 | CLI | 影响范围 | 规范章节 |
+| --- | --- | --- | --- |
+| `SetComment` | `--comment C` | 仅中央目录 | §4.3.12 |
+| `Rename` | `--name N` | 本地头 + 中央目录 | §4.3.7 / §4.3.12 |
+| `SetModificationTime` | `--time ISO8601` | 本地头 + 中央目录 | §4.4.6 |
+| `SetUnixMode` | `--mode OCTAL` | 仅中央目录（external attributes，同时置 host 为 UNIX） | §4.4.15 |
+
+操作在代码里是 `StoredEntry -> StoredEntry` 的纯函数（`EntryOperation`），`EntryEditor` 负责加载、按顺序折叠操作、写回；`.cdfh` 始终以本地头偏移 0 的模板形式保存，真实偏移在 assemble 时回填。
+
+```bash
+java -jar .../free-zip-java-all.jar edit store/hello.txt \
+  --name greeting.txt --comment "hi" --time 2001-02-03T04:05:06 --mode 755
+```
 
 ## Zip64 说明
 
