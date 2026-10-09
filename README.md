@@ -6,10 +6,11 @@
 
 ## 两个过程
 
-```
-文件 ──pack──▶ <key>.lfh + <key>.data + <key>.cdfh
-                          │
-        若干 key ──assemble──▶ 完整 .zip
+```mermaid
+flowchart LR
+    file["文件"] -->|pack| store["<key>.lfh<br/><key>.data<br/><key>.cdfh"]
+    store -->|assemble| zip["完整 .zip"]
+    keys["若干 key"] -->|assemble| zip
 ```
 
 - `pack`：压缩单个文件一次，落盘为三件套。
