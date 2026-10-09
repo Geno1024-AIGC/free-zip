@@ -39,12 +39,4 @@ public final class ZipFormat {
     // Overflow sentinels for 16- and 32-bit fields. APPNOTE.TXT §4.4.1.4.
     public static final int UINT16_MAX = 0xFFFF;
     public static final long UINT32_MAX = 0xFFFFFFFFL;
-
-    // General purpose bit flags. APPNOTE.TXT §4.4.4.
-    public static final int FLAG_DATA_DESCRIPTOR = 1 << 3;
-    public static final int FLAG_UTF8 = 1 << 11;
-
-    // Extra field header IDs. APPNOTE.TXT §4.5.3 (Zip64), §4.5.2 (Info-ZIP Unix).
-    public static final int EXTRA_FIELD_ZIP64 = 0x0001;
-    public static final int EXTRA_FIELD_UNIX = 0x5855;
 }

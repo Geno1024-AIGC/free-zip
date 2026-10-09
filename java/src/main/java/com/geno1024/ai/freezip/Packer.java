@@ -56,14 +56,14 @@ public final class Packer {
                 crc.getValue(),
                 sizes.compressed(),
                 sizes.uncompressed(),
-                DosTime.of(modified),
+                MsDosDateTime.of(modified),
                 hostSystem,
                 externalAttributes,
                 options.comment());
 
-        Files.write(StoredEntryFiles.localHeader(outputPrefix), HeaderCodec.localFileHeader(entry));
+        Files.write(StoredEntryFiles.localHeader(outputPrefix), LocalFileHeader.of(entry).serialize());
         Files.write(StoredEntryFiles.centralHeader(outputPrefix),
-                HeaderCodec.centralDirectoryFileHeader(entry, 0));
+                CentralDirectoryFileHeader.of(entry, 0).serialize());
         return entry;
     }
 

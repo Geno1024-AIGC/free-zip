@@ -20,7 +20,7 @@ public record StoredEntry(
         long crc32,
         long compressedSize,
         long uncompressedSize,
-        DosTime dosTime,
+        MsDosDateTime dosTime,
         int hostSystem,
         int externalAttributes,
         String comment
@@ -44,9 +44,36 @@ public record StoredEntry(
         }
     }
 
+    /**
+     * Combines the two parsed headers, validating that the duplicated fields
+     * agree. Inverse of {@link LocalFileHeader#of} / {@link CentralDirectoryFileHeader#of}.
+     */
+    public static StoredEntry of(LocalFileHeader local, CentralDirectoryFileHeader central) {
+        if (!local.name().equals(central.name())) {
+            throw new IllegalArgumentException(
+                    "name mismatch between local and central header: " + local.name() + " vs " + central.name());
+        }
+        if (local.crc32() != central.crc32()
+                || local.compressedSize() != central.compressedSize()
+                || local.uncompressedSize() != central.uncompressedSize()
+                || local.method() != central.method()) {
+            throw new IllegalArgumentException("inconsistent size/crc/method for entry: " + local.name());
+        }
+        return new StoredEntry(
+                local.name(),
+                local.method(),
+                local.crc32(),
+                local.compressedSize(),
+                local.uncompressedSize(),
+                local.dosTime(),
+                (central.versionMadeBy() >>> 8) & 0xFF,
+                central.externalAttributes(),
+                central.comment());
+    }
+
     /** General purpose bit flag. APPNOTE.TXT §4.4.4 (bit 11 = UTF-8 name). */
     public int flags() {
-        return isAscii(name) && isAscii(comment) ? 0 : ZipFormat.FLAG_UTF8;
+        return isAscii(name) && isAscii(comment) ? 0 : GeneralPurposeBitFlag.UTF8;
     }
 
     /** True when either 32-bit size field would overflow and Zip64 is required. */

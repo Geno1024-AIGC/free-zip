@@ -3,9 +3,9 @@ package com.geno1024.ai.freezip;
 import java.time.LocalDateTime;
 
 /**
- * MS-DOS date/time encoding used by ZIP headers.
+ * MS-DOS date and time fields used by ZIP headers.
  *
- * <p>APPNOTE.TXT §4.4.6 (date/time fields). The format has a two-second
+ * <p>APPNOTE.TXT §4.4.6 (date/time fields). The encoding has a two-second
  * resolution and no time zone, and cannot represent years before 1980.
  *
  * <pre>
@@ -13,13 +13,13 @@ import java.time.LocalDateTime;
  * time: bits 0..4 second / 2, 5..10 minute, 11..15 hour
  * </pre>
  */
-public record DosTime(int time, int date) {
+public record MsDosDateTime(int time, int date) {
 
     /**
-     * Encodes a date/time into the DOS representation, clamping to the
+     * Encodes a date/time into the MS-DOS representation, clamping to the
      * representable range (years are clamped to 1980 and later).
      */
-    public static DosTime of(LocalDateTime value) {
+    public static MsDosDateTime of(LocalDateTime value) {
         int year = Math.max(value.getYear() - 1980, 0);
         int month = value.getMonthValue();
         int day = value.getDayOfMonth();
@@ -29,7 +29,7 @@ public record DosTime(int time, int date) {
 
         int dosDate = ((year & 0x7F) << 9) | ((month & 0x0F) << 5) | (day & 0x1F);
         int dosTime = ((hour & 0x1F) << 11) | ((minute & 0x3F) << 5) | (second & 0x1F);
-        return new DosTime(dosTime, dosDate);
+        return new MsDosDateTime(dosTime, dosDate);
     }
 
     public LocalDateTime toLocalDateTime() {

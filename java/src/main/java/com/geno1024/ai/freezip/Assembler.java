@@ -39,9 +39,9 @@ public final class Assembler {
         for (Path key : keys) {
             byte[] localBytes = Files.readAllBytes(StoredEntryFiles.localHeader(key));
             byte[] centralBytes = Files.readAllBytes(StoredEntryFiles.centralHeader(key));
-            LocalFileHeader local = HeaderParser.parseLocalFileHeader(localBytes);
-            CentralDirectoryFileHeader central = HeaderParser.parseCentralDirectoryFileHeader(centralBytes);
-            StoredEntry entry = HeaderParser.toStoredEntry(local, central);
+            LocalFileHeader local = LocalFileHeader.parse(localBytes);
+            CentralDirectoryFileHeader central = CentralDirectoryFileHeader.parse(centralBytes);
+            StoredEntry entry = StoredEntry.of(local, central);
 
             Path dataPath = StoredEntryFiles.data(key);
             long dataSize = Files.size(dataPath);
@@ -55,7 +55,7 @@ public final class Assembler {
             copy(dataPath, out);                                    // §4.3.8
             offset += localBytes.length + dataSize;
 
-            byte[] centralEntry = HeaderCodec.centralDirectoryFileHeader(entry, localHeaderOffset);
+            byte[] centralEntry = CentralDirectoryFileHeader.of(entry, localHeaderOffset).serialize();
             centralEntries.add(centralEntry);
             centralDirectorySize += centralEntry.length;
             count++;
@@ -81,12 +81,12 @@ public final class Assembler {
         for (Path key : entryKeys) {
             byte[] localBytes = Files.readAllBytes(StoredEntryFiles.localHeader(key));
             byte[] centralBytes = Files.readAllBytes(StoredEntryFiles.centralHeader(key));
-            LocalFileHeader local = HeaderParser.parseLocalFileHeader(localBytes);
-            CentralDirectoryFileHeader central = HeaderParser.parseCentralDirectoryFileHeader(centralBytes);
-            StoredEntry entry = HeaderParser.toStoredEntry(local, central);
+            LocalFileHeader local = LocalFileHeader.parse(localBytes);
+            CentralDirectoryFileHeader central = CentralDirectoryFileHeader.parse(centralBytes);
+            StoredEntry entry = StoredEntry.of(local, central);
 
             long dataSize = Files.size(StoredEntryFiles.data(key));
-            centralDirectorySize += HeaderCodec.centralDirectoryFileHeader(entry, offset).length;
+            centralDirectorySize += CentralDirectoryFileHeader.of(entry, offset).serialize().length;
             offset += localBytes.length + dataSize;
             count++;
         }

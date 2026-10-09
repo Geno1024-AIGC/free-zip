@@ -97,7 +97,7 @@ class PackerAssemblerTest {
         Files.createDirectories(prefix.getParent());
         Packer.pack(input, prefix, PackOptions.defaults(null));
 
-        CentralDirectoryFileHeader parsed = HeaderParser.parseCentralDirectoryFileHeader(
+        CentralDirectoryFileHeader parsed = CentralDirectoryFileHeader.parse(
                 Files.readAllBytes(StoredEntryFiles.centralHeader(prefix)));
         assertEquals(UnixMode.externalAttributes(mode), parsed.externalAttributes());
     }
