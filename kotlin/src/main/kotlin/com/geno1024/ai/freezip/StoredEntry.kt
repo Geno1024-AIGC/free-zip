@@ -29,6 +29,14 @@ data class StoredEntry(
         require(name.isNotEmpty()) { "entry name must not be empty" }
         require(crc32 in 0L..ZipFormat.UINT32_MAX) { "crc32 out of range: $crc32" }
         require(compressedSize >= 0 && uncompressedSize >= 0) { "sizes must not be negative" }
+        require(name.toByteArray(StandardCharsets.UTF_8).size <= ZipFormat.UINT16_MAX) {
+            "entry name too long: $name"
+        }
+        comment?.let {
+            require(it.toByteArray(StandardCharsets.UTF_8).size <= ZipFormat.UINT16_MAX) {
+                "entry comment too long (max 65535 UTF-8 bytes)"
+            }
+        }
     }
 
     /** General purpose bit flag. APPNOTE.TXT §4.4.4 (bit 11 = UTF-8 name). */

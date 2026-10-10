@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.ArrayList
+import java.util.HashSet
 
 /**
  * Assembles stored entries into a complete ZIP archive, in a single pass.
@@ -29,6 +30,7 @@ object Assembler {
         var count = 0L
         var centralDirectorySize = 0L
         val centralEntries = ArrayList<ByteArray>(entryKeys.size)
+        val seenNames = HashSet<String>(entryKeys.size)
 
         for (key in entryKeys) {
             val localBytes = Files.readAllBytes(StoredEntryFiles.localHeader(key))
@@ -36,6 +38,9 @@ object Assembler {
             val local = LocalFileHeader.parse(localBytes)
             val central = CentralDirectoryFileHeader.parse(centralBytes)
             val entry = StoredEntry.of(local, central)
+            if (!seenNames.add(entry.name)) {
+                throw IOException("duplicate entry name: ${entry.name}")
+            }
 
             val dataPath = StoredEntryFiles.data(key)
             val dataSize = Files.size(dataPath)
@@ -73,6 +78,7 @@ object Assembler {
         var offset = 0L
         var count = 0L
         var centralDirectorySize = 0L
+        val seenNames = HashSet<String>(entryKeys.size)
 
         for (key in entryKeys) {
             val localBytes = Files.readAllBytes(StoredEntryFiles.localHeader(key))
@@ -80,6 +86,9 @@ object Assembler {
             val local = LocalFileHeader.parse(localBytes)
             val central = CentralDirectoryFileHeader.parse(centralBytes)
             val entry = StoredEntry.of(local, central)
+            if (!seenNames.add(entry.name)) {
+                throw IOException("duplicate entry name: ${entry.name}")
+            }
 
             val dataSize = Files.size(StoredEntryFiles.data(key))
             centralDirectorySize += CentralDirectoryFileHeader.of(entry, offset).serialize().size
@@ -139,12 +148,23 @@ object Assembler {
         centralDirectorySize: Long,
         centralDirectoryOffset: Long,
         options: AssembleOptions,
-    ): Boolean = when (options.zip64) {
-        AssembleOptions.Zip64Mode.ALWAYS -> true
-        AssembleOptions.Zip64Mode.NEVER -> false
-        AssembleOptions.Zip64Mode.AUTO -> count >= ZipFormat.UINT16_MAX ||
+    ): Boolean {
+        val needed = count >= ZipFormat.UINT16_MAX ||
             centralDirectorySize >= ZipFormat.UINT32_MAX ||
             centralDirectoryOffset >= ZipFormat.UINT32_MAX
+        return when (options.zip64) {
+            AssembleOptions.Zip64Mode.ALWAYS -> true
+            AssembleOptions.Zip64Mode.NEVER -> {
+                if (needed) {
+                    throw IOException(
+                        "--zip64 never but the archive requires Zip64 " +
+                            "(too many entries, or central directory size/offset exceeds 4 GiB)",
+                    )
+                }
+                false
+            }
+            AssembleOptions.Zip64Mode.AUTO -> needed
+        }
     }
 
     private fun commentBytes(options: AssembleOptions): ByteArray =

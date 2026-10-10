@@ -42,6 +42,14 @@ public record StoredEntry(
         if (dosTime == null) {
             throw new IllegalArgumentException("dosTime must not be null");
         }
+        byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
+        if (nameBytes.length > ZipFormat.UINT16_MAX) {
+            throw new IllegalArgumentException("entry name too long: " + name);
+        }
+        if (comment != null
+                && comment.getBytes(StandardCharsets.UTF_8).length > ZipFormat.UINT16_MAX) {
+            throw new IllegalArgumentException("entry comment too long (max 65535 UTF-8 bytes)");
+        }
     }
 
     /**

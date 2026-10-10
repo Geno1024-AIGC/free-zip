@@ -7,7 +7,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Assembles stored entries into a complete ZIP archive, in a single pass.
@@ -35,6 +37,7 @@ public final class Assembler {
         long count = 0;
         long centralDirectorySize = 0;
         List<byte[]> centralEntries = new ArrayList<>(keys.size());
+        Set<String> seenNames = new HashSet<>(keys.size());
 
         for (Path key : keys) {
             byte[] localBytes = Files.readAllBytes(StoredEntryFiles.localHeader(key));
@@ -42,6 +45,9 @@ public final class Assembler {
             LocalFileHeader local = LocalFileHeader.parse(localBytes);
             CentralDirectoryFileHeader central = CentralDirectoryFileHeader.parse(centralBytes);
             StoredEntry entry = StoredEntry.of(local, central);
+            if (!seenNames.add(entry.name())) {
+                throw new IOException("duplicate entry name: " + entry.name());
+            }
 
             Path dataPath = StoredEntryFiles.data(key);
             long dataSize = Files.size(dataPath);
@@ -77,6 +83,7 @@ public final class Assembler {
         long offset = 0;
         long count = 0;
         long centralDirectorySize = 0;
+        Set<String> seenNames = new HashSet<>(entryKeys.size());
 
         for (Path key : entryKeys) {
             byte[] localBytes = Files.readAllBytes(StoredEntryFiles.localHeader(key));
@@ -84,6 +91,9 @@ public final class Assembler {
             LocalFileHeader local = LocalFileHeader.parse(localBytes);
             CentralDirectoryFileHeader central = CentralDirectoryFileHeader.parse(centralBytes);
             StoredEntry entry = StoredEntry.of(local, central);
+            if (!seenNames.add(entry.name())) {
+                throw new IOException("duplicate entry name: " + entry.name());
+            }
 
             long dataSize = Files.size(StoredEntryFiles.data(key));
             centralDirectorySize += CentralDirectoryFileHeader.of(entry, offset).serialize().length;
@@ -125,13 +135,20 @@ public final class Assembler {
     }
 
     private static boolean zip64Required(long count, long centralDirectorySize, long centralDirectoryOffset,
-                                         AssembleOptions options) {
+                                         AssembleOptions options) throws IOException {
+        boolean needed = count >= ZipFormat.UINT16_MAX
+                || centralDirectorySize >= ZipFormat.UINT32_MAX
+                || centralDirectoryOffset >= ZipFormat.UINT32_MAX;
         return switch (options.zip64()) {
             case ALWAYS -> true;
-            case NEVER -> false;
-            case AUTO -> count >= ZipFormat.UINT16_MAX
-                    || centralDirectorySize >= ZipFormat.UINT32_MAX
-                    || centralDirectoryOffset >= ZipFormat.UINT32_MAX;
+            case NEVER -> {
+                if (needed) {
+                    throw new IOException("--zip64 never but the archive requires Zip64 "
+                            + "(too many entries, or central directory size/offset exceeds 4 GiB)");
+                }
+                yield false;
+            }
+            case AUTO -> needed;
         };
     }
 

@@ -1,5 +1,7 @@
 package com.geno1024.ai.freezip;
 
+import java.nio.charset.StandardCharsets;
+
 /**
  * Options controlling archive assembly.
  *
@@ -24,6 +26,9 @@ public record AssembleOptions(Zip64Mode zip64, String comment) {
         }
         if (comment == null) {
             comment = "";
+        }
+        if (comment.getBytes(StandardCharsets.UTF_8).length > ZipFormat.UINT16_MAX) {
+            throw new IllegalArgumentException("archive comment too long (max 65535 UTF-8 bytes)");
         }
     }
 
