@@ -15,6 +15,7 @@ flowchart LR
 
 - `pack`：压缩单个文件一次，落盘为三件套。
 - `edit`：原地修改已打包条目的元数据（注释、名字、时间、Unix 模式），不重新压缩、不动 `.data`。
+- `verify`：核对条目的数据大小与 CRC-32 是否与头部一致，发现损坏即失败。
 - `assemble`：按顺序逐字节复制每个条目的本地头与数据，最后重建中央目录，追加结尾记录。整个过程顺序写出，条目本地头偏移在写中央目录时才知道——这正是“预存头部”方案成立的关键。
 
 ### 三件套命名
@@ -44,6 +45,8 @@ flowchart LR
 ./gradlew :java:test :kotlin:test       # 仅测试
 ```
 
+GitHub Actions 工作流（`.github/workflows/ci.yml`）在每次 push 与 PR 上运行 `./gradlew build`。
+
 运行（以 Java 版为例，Kotlin 版把 jar 名换成 `free-zip-kotlin-all.jar`）：
 
 ```bash
@@ -51,6 +54,8 @@ java -jar java/build/libs/free-zip-java-all.jar \
   pack hello.txt store/hello.txt --method deflate
 java -jar java/build/libs/free-zip-java-all.jar \
   edit store/hello.txt --comment "greeting"
+java -jar java/build/libs/free-zip-java-all.jar verify store
+java -jar java/build/libs/free-zip-java-all.jar info store
 java -jar java/build/libs/free-zip-java-all.jar \
   assemble out.zip store --zip64 auto
 java -jar java/build/libs/free-zip-java-all.jar size store
@@ -61,12 +66,18 @@ java -jar java/build/libs/free-zip-java-all.jar size store
 ```
 free-zip pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]
 free-zip edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]
+free-zip verify   <entry|dir>...
+free-zip info     <entry|dir>...
 free-zip assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]
 free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]
+free-zip repl
 ```
 
-- `assemble` / `size` 接受条目 key，或包含 `*.lfh` 的目录（目录内按文件名排序）。
+- `assemble` / `size` / `verify` / `info` 接受条目 key，或包含 `*.lfh` 的目录（目录内按文件名排序）。
 - `size` 精确计算 `assemble` 将产生的字节数，可用于 HTTP `Content-Length`，且不读取任何载荷。
+- `verify` 逐条做完整性检查：先核对 `<key>.data` 字节数与头部“压缩大小”一致；再核对 CRC-32（存储条目直接计算，deflate 条目边解压边计算——载荷是原始 deflate 流，§4.3.8）；任何失败都以非零退出码收尾。POST 出去前先 `verify` 一轮，就能拦住损坏的 `.data`。
+- `info` 只读元数据（名字、方法、大小、CRC、修改时间、host、Unix 模式、注释），不做完整校验，适合快速看字段。
+- `repl` 进入交互会话：逐行执行同样的子命令（参数支持引号包裹），`exit` / `quit` 退出，`help` 查看用法；出错会打印错误并继续，方便反复“编辑一下、看一眼、再核对”。
 - `--zip64`：`auto`（仅在字段溢出时写 Zip64 记录）、`always`（总是写，并使经典 EOCD 字段饱和）、`never`。
 - `--comment`（`assemble` / `size`）：写入**归档注释**（End of Central Directory record，§4.3.16），以 UTF-8 编码，规范上限 65535 字节。**条目注释**另走 `edit --comment`（见下），不放在 `pack` 里，因为注释与压缩无关、属于纯元数据改动。
 
@@ -98,6 +109,70 @@ APPNOTE.TXT §4.5.3 的 Zip64 扩展信息字段（header id `0x0001`）按 16/3
 
 结尾记录的字段定义见 §4.3.14（Zip64 EOCD record）、§4.3.15（Zip64 EOCD locator）、§4.3.16（经典 EOCD）。
 
+`--zip64 never` 遇到**必须**写 Zip64 的归档（条目数达到 65535，或中央目录大小 / 偏移超过 4 GiB）会直接报错并拒绝组装，而不是静默产出读不出来的文件；`size` 在相同参数下同样报错，让调用方在拼装前就能发现。
+
+## 输入校验
+
+名字、注释在头部里都是 16 位长度字段，所以条目名字、条目注释、归档注释都受 **65535 UTF-8 字节**上限约束。这些校验在构造 `StoredEntry` / `AssembleOptions` 时抛出 `IllegalArgumentException`，把“拼出读不动的归档”拖到最早一刻。另外，`assemble` 会拒绝**重名条目**——ZIP 里重名条目会让解压器的查找行为未定义，徒增成本。
+
+相关加固（`assemble` / `size` / `verify` / 长度校验）在两个模块各有测试覆盖（`HardeningTest`）。
+
+## 作为库使用
+
+直接依赖模块的源码即可（`:java` 或 `:kotlin`，产物完全一致）：
+
+Java：
+
+```java
+import com.geno1024.ai.freezip.Assembler;
+import com.geno1024.ai.freezip.AssembleOptions;
+import com.geno1024.ai.freezip.EntryEditor;
+import com.geno1024.ai.freezip.EntryOperation;
+import com.geno1024.ai.freezip.PackOptions;
+import com.geno1024.ai.freezip.Packer;
+import com.geno1024.ai.freezip.Verifier;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+Path prefix = Path.of("store/hello.txt");
+Packer.pack(Path.of("hello.txt"), prefix, PackOptions.defaults("hello.txt"));
+EntryEditor.edit(prefix, List.of(new EntryOperation.SetComment("hi")));
+Verifier.verify(prefix);
+
+Path zip = Path.of("out.zip");
+try (var out = Files.newOutputStream(zip)) {
+    Assembler.assemble(List.of(prefix), out, AssembleOptions.defaults());
+}
+long bytes = Assembler.estimateSize(List.of(prefix), AssembleOptions.defaults());
+```
+
+Kotlin：
+
+```kotlin
+import com.geno1024.ai.freezip.AssembleOptions
+import com.geno1024.ai.freezip.Assembler
+import com.geno1024.ai.freezip.EntryEditor
+import com.geno1024.ai.freezip.EntryOperation
+import com.geno1024.ai.freezip.PackOptions
+import com.geno1024.ai.freezip.Packer
+import com.geno1024.ai.freezip.Verifier
+import java.nio.file.Files
+import java.nio.file.Path
+
+val prefix = Path.of("store/hello.txt")
+Packer.pack(Path.of("hello.txt"), prefix, PackOptions.defaults("hello.txt"))
+EntryEditor.edit(prefix, listOf(EntryOperation.SetComment("hi")))
+Verifier.verify(prefix)
+
+Files.newOutputStream(Path.of("out.zip")).use { Assembler.assemble(listOf(prefix), it, AssembleOptions.defaults()) }
+val bytes = Assembler.estimateSize(listOf(prefix), AssembleOptions.defaults())
+```
+
+## 代码约定
+
+`--zip64 never` 遇到**必须**写 Zip64 的归档（条目数达到 65535，或中央目录大小 / 偏移超过 4 GiB）会直接报错并拒绝组装，而不是静默产出读不出来的文件；`size` 在相同参数下同样报错，让调用方在拼装前就能发现。
+
 ## 代码约定
 
 - 代码文件名与类名尽量贴近 APPNOTE.TXT 术语（如 `LocalFileHeader`、`CentralDirectoryFileHeader`、`GeneralPurposeBitFlag`、`MsDosDateTime`、`Zip64ExtendedInformationExtraField`）。
@@ -110,6 +185,7 @@ APPNOTE.TXT §4.5.3 的 Zip64 扩展信息字段（header id `0x0001`）按 16/3
 ```
 build.gradle.kts        根脚本（含 build_count.txt 构建计数）
 build_count.txt         每次 Gradle 配置阶段 +1，随提交一起提交
+.github/workflows/ci.yml  CI：每次 push / PR 运行 ./gradlew build
 java/                   Java 实现与测试
 kotlin/                 Kotlin 实现与测试
 ```
