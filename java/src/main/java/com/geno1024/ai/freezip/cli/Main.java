@@ -9,8 +9,15 @@ import com.geno1024.ai.freezip.PackOptions;
 import com.geno1024.ai.freezip.Packer;
 import com.geno1024.ai.freezip.StoredEntry;
 import com.geno1024.ai.freezip.StoredEntryFiles;
+import com.geno1024.ai.freezip.Verifier;
+import com.geno1024.ai.freezip.ZipFormat;
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -27,8 +34,11 @@ import java.util.zip.Deflater;
  * <pre>
  * free-zip pack     &lt;input-file&gt; &lt;output-prefix&gt; [--name N] [--method store|deflate] [--level L]
  * free-zip edit     &lt;entry&gt;    [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]
+ * free-zip verify   &lt;entry|dir&gt;...
+ * free-zip info     &lt;entry|dir&gt;...
  * free-zip assemble &lt;output.zip&gt; &lt;entry|dir&gt;...    [--zip64 auto|always|never] [--comment C]
  * free-zip size     &lt;entry|dir&gt;...                 [--zip64 auto|always|never] [--comment C]
+ * free-zip repl
  * </pre>
  */
 public final class Main {
@@ -36,7 +46,20 @@ public final class Main {
     private Main() {
     }
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
+        try {
+            run(args);
+        } catch (IllegalArgumentException e) {
+            System.err.println("error: " + e.getMessage());
+            usage(System.err);
+            System.exit(2);
+        } catch (Exception e) {
+            System.err.println("error: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    private static void run(String[] args) throws Exception {
         if (args.length == 0) {
             usage(System.out);
             return;
@@ -44,14 +67,13 @@ public final class Main {
         switch (args[0]) {
             case "pack" -> pack(args);
             case "edit" -> edit(args);
+            case "verify" -> verify(args);
+            case "info" -> info(args);
             case "assemble" -> assemble(args);
             case "size" -> size(args);
+            case "repl" -> repl();
             case "help", "-h", "--help" -> usage(System.out);
-            default -> {
-                System.err.println("unknown command: " + args[0]);
-                usage(System.err);
-                System.exit(2);
-            }
+            default -> throw new IllegalArgumentException("unknown command: " + args[0]);
         }
     }
 
@@ -62,6 +84,9 @@ public final class Main {
         }
         Path input = Path.of(parsed.positional.get(0));
         Path prefix = Path.of(parsed.positional.get(1));
+        if (prefix.getParent() != null) {
+            Files.createDirectories(prefix.getParent());
+        }
         CompressionMethod method = parseMethod(parsed.option("method", "deflate"));
         int level = parsed.has("level")
                 ? Integer.parseInt(parsed.option("level", ""))
@@ -109,6 +134,48 @@ public final class Main {
                 entry.name(), entry.dosTime(), entry.comment());
     }
 
+    private static void verify(String[] args) throws IOException {
+        Parsed parsed = Parsed.from(args);
+        List<Path> keys = collectKeys(parsed.positional);
+        int failed = 0;
+        for (Path key : keys) {
+            try {
+                Verifier.verify(key);
+                System.out.println("ok " + key);
+            } catch (IOException e) {
+                failed++;
+                System.err.println("FAIL " + key + ": " + e.getMessage());
+            }
+        }
+        if (failed > 0) {
+            throw new IOException(failed + " of " + keys.size() + " entries failed verification");
+        }
+    }
+
+    private static void info(String[] args) throws IOException {
+        Parsed parsed = Parsed.from(args);
+        List<Path> keys = collectKeys(parsed.positional);
+        for (Path key : keys) {
+            StoredEntry entry = EntryEditor.load(key);
+            describeEntry(key, entry);
+        }
+    }
+
+    private static void describeEntry(Path key, StoredEntry entry) {
+        String mode = entry.hostSystem() == ZipFormat.HOST_UNIX && entry.externalAttributes() != 0
+                ? String.format(" mode=%04o", entry.externalAttributes() >>> 16)
+                : "";
+        System.out.printf("%s%n", key);
+        System.out.printf("  name=%s method=%s compressed=%d uncompressed=%d crc=%08x%n",
+                entry.name(), entry.method().name().toLowerCase(),
+                entry.compressedSize(), entry.uncompressedSize(), entry.crc32());
+        System.out.printf("  modified=%s host=%s%s comment=%s%n",
+                entry.dosTime().toLocalDateTime(),
+                entry.hostSystem() == ZipFormat.HOST_UNIX ? "unix" : "dos",
+                mode,
+                entry.comment() == null ? "" : entry.comment());
+    }
+
     private static void assemble(String[] args) throws IOException {
         Parsed parsed = Parsed.from(args);
         if (parsed.positional.isEmpty()) {
@@ -118,7 +185,7 @@ public final class Main {
         List<Path> keys = collectKeys(parsed.positional.subList(1, parsed.positional.size()));
         AssembleOptions options = assembleOptions(parsed);
 
-        try (OutputStream out = Files.newOutputStream(output)) {
+        try (OutputStream out = new BufferedOutputStream(Files.newOutputStream(output))) {
             Assembler.assemble(keys, out, options);
         }
         System.out.printf("assembled %d entries -> %s (%d bytes)%n",
@@ -130,6 +197,64 @@ public final class Main {
         List<Path> keys = collectKeys(parsed.positional);
         long estimated = Assembler.estimateSize(keys, assembleOptions(parsed));
         System.out.println(estimated);
+    }
+
+    private static void repl() throws IOException {
+        System.out.println("free-zip repl — type a command (help for usage, exit to quit)");
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        while (true) {
+            System.out.print("free-zip> ");
+            System.out.flush();
+            String line = reader.readLine();
+            if (line == null) {
+                break;
+            }
+            String[] argv = tokenize(line.trim());
+            if (argv.length == 0) {
+                continue;
+            }
+            switch (argv[0]) {
+                case "exit", "quit" -> {
+                    return;
+                }
+                case "repl" -> System.err.println("error: already in the repl");
+                default -> {
+                    try {
+                        run(argv);
+                    } catch (Exception e) {
+                        System.err.println("error: " + e.getMessage());
+                    }
+                }
+            }
+        }
+    }
+
+    /** Splits a REPL line into argv tokens, honoring single/double quotes. */
+    private static String[] tokenize(String line) {
+        List<String> tokens = new ArrayList<>();
+        int i = 0;
+        while (i < line.length()) {
+            while (i < line.length() && Character.isWhitespace(line.charAt(i))) {
+                i++;
+            }
+            if (i >= line.length()) {
+                break;
+            }
+            char quote = line.charAt(i) == '"' || line.charAt(i) == '\'' ? line.charAt(i) : 0;
+            if (quote != 0) {
+                i++;
+            }
+            StringBuilder token = new StringBuilder();
+            while (i < line.length() && (quote != 0 ? line.charAt(i) != quote
+                    : !Character.isWhitespace(line.charAt(i)))) {
+                token.append(line.charAt(i++));
+            }
+            if (quote != 0 && i < line.length()) {
+                i++;
+            }
+            tokens.add(token.toString());
+        }
+        return tokens.toArray(new String[0]);
     }
 
     private static AssembleOptions assembleOptions(Parsed parsed) {
@@ -174,13 +299,16 @@ public final class Main {
         };
     }
 
-    private static void usage(java.io.PrintStream out) {
+    private static void usage(PrintStream out) {
         out.println("free-zip — pre-compressed ZIP assembly");
         out.println();
         out.println("  pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]");
         out.println("  edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]");
+        out.println("  verify   <entry|dir>...              checks size and CRC of stored payloads");
+        out.println("  info     <entry|dir>...              shows entry metadata");
         out.println("  assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]");
         out.println("  size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]");
+        out.println("  repl                                  interactive session");
         out.println();
         out.println("A stored entry is a key plus three files: <key>.lfh, <key>.data, <key>.cdfh.");
     }

@@ -7,8 +7,16 @@ import com.geno1024.ai.freezip.EntryEditor
 import com.geno1024.ai.freezip.EntryOperation
 import com.geno1024.ai.freezip.PackOptions
 import com.geno1024.ai.freezip.Packer
+import com.geno1024.ai.freezip.StoredEntry
 import com.geno1024.ai.freezip.StoredEntryFiles
+import com.geno1024.ai.freezip.Verifier
+import com.geno1024.ai.freezip.ZipFormat
+import java.io.BufferedReader
+import java.io.BufferedOutputStream
+import java.io.IOException
+import java.io.InputStreamReader
 import java.io.PrintStream
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.LocalDateTime
@@ -21,11 +29,27 @@ import kotlin.system.exitProcess
  * ```
  * free-zip pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]
  * free-zip edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]
+ * free-zip verify   <entry|dir>...
+ * free-zip info     <entry|dir>...
  * free-zip assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]
  * free-zip size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]
+ * free-zip repl
  * ```
  */
 fun main(args: Array<String>) {
+    try {
+        execute(args)
+    } catch (e: IllegalArgumentException) {
+        System.err.println("error: ${e.message}")
+        usage(System.err)
+        exitProcess(2)
+    } catch (e: Exception) {
+        System.err.println("error: ${e.message}")
+        exitProcess(1)
+    }
+}
+
+private fun execute(args: Array<String>) {
     if (args.isEmpty()) {
         usage(System.out)
         return
@@ -33,14 +57,13 @@ fun main(args: Array<String>) {
     when (args[0]) {
         "pack" -> pack(args)
         "edit" -> edit(args)
+        "verify" -> verify(args)
+        "info" -> info(args)
         "assemble" -> assemble(args)
         "size" -> size(args)
+        "repl" -> repl()
         "help", "-h", "--help" -> usage(System.out)
-        else -> {
-            System.err.println("unknown command: ${args[0]}")
-            usage(System.err)
-            exitProcess(2)
-        }
+        else -> throw IllegalArgumentException("unknown command: ${args[0]}")
     }
 }
 
@@ -49,6 +72,7 @@ private fun pack(args: Array<String>) {
     require(parsed.positional.size == 2) { "pack expects <input-file> <output-prefix>" }
     val input = Path.of(parsed.positional[0])
     val prefix = Path.of(parsed.positional[1])
+    prefix.parent?.let { Files.createDirectories(it) }
     val method = parseMethod(parsed.option("method", "deflate"))
     val level = if (parsed.has("level")) {
         parsed.option("level", "").toInt()
@@ -94,6 +118,51 @@ private fun edit(args: Array<String>) {
     println("  name=${entry.name} time=${entry.dosTime} comment=${entry.comment}")
 }
 
+private fun verify(args: Array<String>) {
+    val parsed = Parsed.from(args)
+    val keys = collectKeys(parsed.positional)
+    var failed = 0
+    for (key in keys) {
+        try {
+            Verifier.verify(key)
+            println("ok $key")
+        } catch (e: IOException) {
+            failed++
+            System.err.println("FAIL $key: ${e.message}")
+        }
+    }
+    if (failed > 0) {
+        throw IOException("$failed of ${keys.size} entries failed verification")
+    }
+}
+
+private fun info(args: Array<String>) {
+    val parsed = Parsed.from(args)
+    val keys = collectKeys(parsed.positional)
+    for (key in keys) {
+        describeEntry(key, EntryEditor.load(key))
+    }
+}
+
+private fun describeEntry(key: Path, entry: StoredEntry) {
+    val mode = if (entry.hostSystem == ZipFormat.HOST_UNIX && entry.externalAttributes != 0) {
+        " mode=${(entry.externalAttributes ushr 16).toString(8).padStart(4, '0')}"
+    } else {
+        ""
+    }
+    println(key)
+    println(
+        "  name=${entry.name} method=${entry.method.name.lowercase()} " +
+            "compressed=${entry.compressedSize} uncompressed=${entry.uncompressedSize} " +
+            "crc=${entry.crc32.toString(16).padStart(8, '0')}",
+    )
+    println(
+        "  modified=${entry.dosTime.toLocalDateTime()} " +
+            "host=${if (entry.hostSystem == ZipFormat.HOST_UNIX) "unix" else "dos"}$mode " +
+            "comment=${entry.comment ?: ""}",
+    )
+}
+
 private fun assemble(args: Array<String>) {
     val parsed = Parsed.from(args)
     require(parsed.positional.isNotEmpty()) { "assemble expects <output.zip> <entry|dir>..." }
@@ -101,8 +170,10 @@ private fun assemble(args: Array<String>) {
     val keys = collectKeys(parsed.positional.drop(1))
     val options = assembleOptions(parsed)
 
-    Files.newOutputStream(output).use { out ->
-        Assembler.assemble(keys, out, options)
+    Files.newOutputStream(output).use { raw ->
+        BufferedOutputStream(raw).use { out ->
+            Assembler.assemble(keys, out, options)
+        }
     }
     println("assembled ${keys.size} entries -> $output (${Files.size(output)} bytes)")
 }
@@ -111,6 +182,48 @@ private fun size(args: Array<String>) {
     val parsed = Parsed.from(args)
     val keys = collectKeys(parsed.positional)
     println(Assembler.estimateSize(keys, assembleOptions(parsed)))
+}
+
+private fun repl() {
+    println("free-zip repl — type a command (help for usage, exit to quit)")
+    val reader = BufferedReader(InputStreamReader(System.`in`, StandardCharsets.UTF_8))
+    while (true) {
+        print("free-zip> ")
+        System.out.flush()
+        val line = reader.readLine() ?: break
+        val argv = tokenize(line.trim())
+        if (argv.isEmpty()) continue
+        when (argv[0]) {
+            "exit", "quit" -> return
+            "repl" -> System.err.println("error: already in the repl")
+            else -> {
+                try {
+                    execute(argv)
+                } catch (e: Exception) {
+                    System.err.println("error: ${e.message}")
+                }
+            }
+        }
+    }
+}
+
+/** Splits a REPL line into argv tokens, honoring single/double quotes. */
+private fun tokenize(line: String): Array<String> {
+    val tokens = ArrayList<String>()
+    var i = 0
+    while (i < line.length) {
+        while (i < line.length && line[i].isWhitespace()) i++
+        if (i >= line.length) break
+        val quote: Char? = if (line[i] == '"' || line[i] == '\'') line[i] else null
+        if (quote != null) i++
+        val token = StringBuilder()
+        while (i < line.length && (if (quote != null) line[i] != quote else !line[i].isWhitespace())) {
+            token.append(line[i++])
+        }
+        if (quote != null && i < line.length) i++
+        tokens.add(token.toString())
+    }
+    return tokens.toTypedArray()
 }
 
 private fun assembleOptions(parsed: Parsed): AssembleOptions {
@@ -157,8 +270,11 @@ private fun usage(out: PrintStream) {
     out.println()
     out.println("  pack     <input-file> <output-prefix> [--name N] [--method store|deflate] [--level L]")
     out.println("  edit     <entry>                     [--name N] [--comment C] [--time ISO8601] [--mode OCTAL]")
+    out.println("  verify   <entry|dir>...              checks size and CRC of stored payloads")
+    out.println("  info     <entry|dir>...              shows entry metadata")
     out.println("  assemble <output.zip> <entry|dir>...  [--zip64 auto|always|never] [--comment C]")
     out.println("  size     <entry|dir>...               [--zip64 auto|always|never] [--comment C]")
+    out.println("  repl                                  interactive session")
     out.println()
     out.println("A stored entry is a key plus three files: <key>.lfh, <key>.data, <key>.cdfh.")
 }
